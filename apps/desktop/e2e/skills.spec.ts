@@ -207,15 +207,15 @@ test.describe("Skills Page", () => {
     }
 
     // --- Seed a fake installed skill directory ---
-    // Get homedir from Electron process, then create files in the test process
-    // (electronApp.evaluate doesn't support require/import)
-    const homeDir = await electronApp.evaluate(() => process.env.HOME || process.env.USERPROFILE || "");
-    expect(homeDir).toBeTruthy();
+    // Get OPENCLAW_STATE_DIR from Electron process (set by e2e fixture for data isolation),
+    // then create files in the test process.
+    const openclawStateDir = await electronApp.evaluate(() => process.env.OPENCLAW_STATE_DIR || "");
+    expect(openclawStateDir).toBeTruthy();
 
     const { mkdirSync, writeFileSync } = await import("node:fs");
     const { join } = await import("node:path");
 
-    const skillDir = join(homeDir, ".easyclaw", "openclaw", "skills", "e2e-test-skill");
+    const skillDir = join(openclawStateDir, "skills", "e2e-test-skill");
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(
       join(skillDir, "SKILL.md"),
@@ -281,7 +281,7 @@ test.describe("Skills Page", () => {
     expect(exists).toBe(false);
   });
 
-  test("install from server + delete lifecycle", async ({ window }) => {
+  test("install from server + delete lifecycle", async ({ electronApp, window }) => {
     // --- Get a real skill slug from the market API ---
     const marketRes = await window.evaluate(async () => {
       const res = await fetch("http://127.0.0.1:3210/api/skills/market?pageSize=1");
@@ -309,10 +309,13 @@ test.describe("Skills Page", () => {
     }
 
     // --- Verify skill directory was created on disk ---
+    // Get OPENCLAW_STATE_DIR from the Electron process (set by e2e fixture for data isolation)
+    const openclawStateDir = await electronApp.evaluate(() => process.env.OPENCLAW_STATE_DIR || "");
+    expect(openclawStateDir).toBeTruthy();
+
     const { existsSync: existsSyncCheck, readdirSync } = await import("node:fs");
     const { join: joinPath } = await import("node:path");
-    const { homedir } = await import("node:os");
-    const installedSkillDir = joinPath(homedir(), ".easyclaw", "openclaw", "skills", realSlug);
+    const installedSkillDir = joinPath(openclawStateDir, "skills", realSlug);
     expect(existsSyncCheck(installedSkillDir)).toBe(true);
 
     // Verify directory has content (at least one file like SKILL.md)

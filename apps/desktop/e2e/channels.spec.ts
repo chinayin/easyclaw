@@ -19,7 +19,7 @@ test.describe("Channels Page", () => {
     // the gateway responds with channel status (polling starts immediately).
     const channelTitle = window.locator(".channel-title");
     await expect(channelTitle).toBeVisible({ timeout: 15_000 });
-    await expect(channelTitle).toHaveText("Channels");
+    await expect(channelTitle).toHaveText("Messaging");
 
     // Verify the refresh button is present
     const refreshBtn = window.locator(".channel-header .btn.btn-secondary");
@@ -35,6 +35,6 @@ test.describe("Channels Page", () => {
 
     // Verify the table has expected column headers
     const headers = table.locator("thead th");
-    await expect(headers).toHaveCount(6);
+    await expect(headers).toHaveCount(7);
   });
 });

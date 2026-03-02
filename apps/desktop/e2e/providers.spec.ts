@@ -183,8 +183,9 @@ test.describe("LLM Providers", () => {
         errorAlert.waitFor({ state: "visible", timeout: 30_000 }).then(() => "error" as const),
       ]).catch(() => "timeout" as const);
       if (result === "ok") break;
-      // Validation timed out or failed transiently — retry
+      // Validation timed out or failed transiently (e.g. 429 rate limit) — wait and retry
       if (attempt < 2) {
+        await window.waitForTimeout(5_000);
         // Clear error and re-enter key to retry
         await form.locator("input[type='password']").fill(zhipuKey!);
       }
