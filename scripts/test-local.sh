@@ -328,6 +328,8 @@ if [ "$PIPELINE_FAILED" = false ] && [ "$SKIP_TESTS" = false ]; then
 fi
 
 # ---- Step 6: E2E tests (dev mode) ----
+# Capture pipeline state before dev e2e — steps 7/8/9 run even if dev e2e fails.
+EARLY_FAILURE="$PIPELINE_FAILED"
 if [ "$PIPELINE_FAILED" = false ] && [ "$SKIP_TESTS" = false ]; then
   step "Run E2E tests (dev mode)"
   step_start=$SECONDS
@@ -343,12 +345,14 @@ if [ "$PIPELINE_FAILED" = false ] && [ "$SKIP_TESTS" = false ]; then
 fi
 
 # ---- Step 7: Pack (unpacked app for prod e2e) ----
-if [ "$PIPELINE_FAILED" = false ]; then
+PACK_SUCCEEDED=false
+if [ "$EARLY_FAILURE" = false ]; then
   step "Pack application (electron-builder --dir)"
   step_start=$SECONDS
   # Clean stale release dirs to avoid picking up wrong binary in prod E2E
   rm -rf "$RELEASE_DIR"
   if (cd "$DESKTOP_DIR" && pnpm run pack); then
+    PACK_SUCCEEDED=true
     record_step "pack" 0 $((SECONDS - step_start))
     info "Pack complete."
   else
@@ -359,10 +363,12 @@ fi
 # ---- Step 8: Restore dual prebuilds ----
 # electron-builder's @electron/rebuild overwrites build/Release/ with Electron ABI.
 # Restore dual prebuilds so the Node.js-based E2E seed helper can load better-sqlite3.
-if [ "$PIPELINE_FAILED" = false ]; then
+REBUILD2_SUCCEEDED=false
+if [ "$EARLY_FAILURE" = false ]; then
   step "Restore dual prebuilds after electron-builder"
   step_start=$SECONDS
   if bash "$REPO_ROOT/scripts/rebuild-native.sh"; then
+    REBUILD2_SUCCEEDED=true
     record_step "rebuild-native" 0 $((SECONDS - step_start))
   else
     record_step "rebuild-native" 1 $((SECONDS - step_start))
@@ -370,7 +376,7 @@ if [ "$PIPELINE_FAILED" = false ]; then
 fi
 
 # ---- Step 9: E2E tests (prod mode) ----
-if [ "$PIPELINE_FAILED" = false ] && [ "$SKIP_TESTS" = false ]; then
+if [ "$EARLY_FAILURE" = false ] && [ "$PACK_SUCCEEDED" = true ] && [ "$REBUILD2_SUCCEEDED" = true ] && [ "$SKIP_TESTS" = false ]; then
   step "Run E2E tests (prod mode)"
   step_start=$SECONDS
 
