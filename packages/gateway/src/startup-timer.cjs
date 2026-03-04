@@ -11,10 +11,11 @@
 const t0 = performance.now();
 let requireCount = 0;
 let requireTotalMs = 0;
-let compileCount = 0;
-let compileTotalMs = 0;
-let readSyncCount = 0;
-let readSyncTotalMs = 0;
+
+// Filesystem operation counters
+let fsOpCount = 0;
+let fsOpTotalMs = 0;
+let fsSlowOps = []; // Collect slow ops for summary
 
 function logPhase(label) {
   const elapsed = (performance.now() - t0).toFixed(0);
@@ -23,7 +24,7 @@ function logPhase(label) {
 
 logPhase("preload executing");
 
-// ── Hook CJS Module._load to time slow requires ──
+// ── Hook CJS Module._load ──
 const Module = require("module");
 const origLoad = Module._load;
 
@@ -41,14 +42,52 @@ Module._load = function timedLoad(request, parent, isMain) {
   return result;
 };
 
-// ── Hook Module._compile to track jiti's code compilation ──
+// ── Hook sync filesystem operations (Defender scanning shows up here) ──
+const fs = require("fs");
+const path = require("path");
+
+function wrapFsSync(name) {
+  const orig = fs[name];
+  if (typeof orig !== "function") return;
+  fs[name] = function () {
+    fsOpCount++;
+    const start = performance.now();
+    const result = orig.apply(this, arguments);
+    const dur = performance.now() - start;
+    fsOpTotalMs += dur;
+    if (dur > 50) {
+      const arg0 = arguments[0];
+      const p = typeof arg0 === "string" ? arg0 : String(arg0);
+      const shortPath = p.length > 60 ? "..." + p.slice(-57) : p;
+      fsSlowOps.push({ name, path: shortPath, dur });
+      // Log individually if very slow
+      if (dur > 200) {
+        logPhase(`fs.${name}("${shortPath}") took ${dur.toFixed(0)}ms`);
+      }
+    }
+    return result;
+  };
+}
+
+// Hook all commonly used sync fs operations
+[
+  "openSync",
+  "readFileSync",
+  "existsSync",
+  "statSync",
+  "lstatSync",
+  "realpathSync",
+  "readdirSync",
+  "accessSync",
+  "closeSync",
+].forEach(wrapFsSync);
+
+// ── Hook Module._compile (jiti code compilation) ──
 const origCompile = Module.prototype._compile;
 Module.prototype._compile = function timedCompile(content, filename) {
-  compileCount++;
   const start = performance.now();
   const result = origCompile.call(this, content, filename);
   const dur = performance.now() - start;
-  compileTotalMs += dur;
   if (dur > 200) {
     const shortName =
       filename.length > 60 ? "..." + filename.slice(-57) : filename;
@@ -60,46 +99,38 @@ Module.prototype._compile = function timedCompile(content, filename) {
   return result;
 };
 
-// ── Hook fs.readFileSync to track jiti's file reads ──
-const fs = require("fs");
-const origReadFileSync = fs.readFileSync;
-fs.readFileSync = function timedReadFileSync(path, options) {
-  readSyncCount++;
-  const start = performance.now();
-  const result = origReadFileSync.call(this, path, options);
-  const dur = performance.now() - start;
-  readSyncTotalMs += dur;
-  if (dur > 50) {
-    const p = String(path);
-    const shortPath = p.length > 60 ? "..." + p.slice(-57) : p;
-    const sizeKB =
-      Buffer.isBuffer(result) || typeof result === "string"
-        ? (result.length / 1024).toFixed(0)
-        : "?";
-    logPhase(`readFileSync("${shortPath}") took ${dur.toFixed(0)}ms (${sizeKB}KB)`);
-  }
-  return result;
-};
-
 // Log when the event loop starts processing (= all top-level ESM code done).
 setImmediate(() => {
   logPhase(
-    `event loop started (${requireCount} requires/${requireTotalMs.toFixed(0)}ms, ${compileCount} compiles/${compileTotalMs.toFixed(0)}ms, ${readSyncCount} reads/${readSyncTotalMs.toFixed(0)}ms)`,
+    `event loop started (${requireCount} requires/${requireTotalMs.toFixed(0)}ms, ${fsOpCount} fs ops/${fsOpTotalMs.toFixed(0)}ms)`,
   );
 
   // Log periodic heartbeats with cumulative stats
+  let prevFsOps = fsOpCount;
+  let prevFsMs = fsOpTotalMs;
   let heartbeat = 0;
-  let prevCompiles = compileCount;
-  let prevReads = readSyncCount;
   const iv = setInterval(() => {
     heartbeat++;
-    const newCompiles = compileCount - prevCompiles;
-    const newReads = readSyncCount - prevReads;
+    const newOps = fsOpCount - prevFsOps;
+    const newMs = (fsOpTotalMs - prevFsMs).toFixed(0);
     logPhase(
-      `heartbeat #${heartbeat} (compiles: +${newCompiles}=${compileCount}, reads: +${newReads}=${readSyncCount})`,
+      `heartbeat #${heartbeat} (fs: +${newOps} ops/+${newMs}ms, total: ${fsOpCount} ops/${fsOpTotalMs.toFixed(0)}ms)`,
     );
-    prevCompiles = compileCount;
-    prevReads = readSyncCount;
+    // Flush slow ops summary at each heartbeat
+    if (fsSlowOps.length > 0) {
+      const summary = {};
+      for (const op of fsSlowOps) {
+        const key = op.name;
+        summary[key] = (summary[key] || 0) + 1;
+      }
+      const parts = Object.entries(summary)
+        .map(([k, v]) => `${k}:${v}`)
+        .join(", ");
+      logPhase(`  slow fs ops since last heartbeat: ${parts}`);
+      fsSlowOps = [];
+    }
+    prevFsOps = fsOpCount;
+    prevFsMs = fsOpTotalMs;
     if (heartbeat >= 60) clearInterval(iv);
   }, 1000);
   if (iv.unref) iv.unref();
@@ -111,7 +142,7 @@ process.stdout.write = function (chunk, ...args) {
   const str = typeof chunk === "string" ? chunk : chunk.toString();
   if (str.includes("listening on")) {
     logPhase(
-      `gateway listening (READY) — totals: ${compileCount} compiles/${compileTotalMs.toFixed(0)}ms, ${readSyncCount} reads/${readSyncTotalMs.toFixed(0)}ms`,
+      `gateway listening (READY) — ${fsOpCount} fs ops/${fsOpTotalMs.toFixed(0)}ms total`,
     );
   }
   return origStdoutWrite.call(this, chunk, ...args);
