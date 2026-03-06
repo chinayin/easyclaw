@@ -452,8 +452,10 @@ export function startPanelServer(options: PanelServerOptions): Server {
   server.on("close", () => pairingNotifier.stop());
 
   // Restore WeCom relay connection from persisted credentials
+  // TODO: re-enable when cs-relay wecom-kf adapter is ready
+  const wecomRelayDisabled = true;
   const savedRelayUrl = storage.settings.get("wecom-relay-url");
-  if (savedRelayUrl) {
+  if (savedRelayUrl && !wecomRelayDisabled) {
     secretStore.get("wecom-auth-token").then((savedAuthToken) => {
       if (!savedAuthToken) return;
       const gwId = deviceId ?? randomUUID();
