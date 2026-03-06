@@ -451,14 +451,14 @@ export const PROVIDERS: Record<RootProvider, ProviderMeta> = {
         apiKeyUrl: "https://bailian.console.aliyun.com/cn-beijing/?tab=model#/efm/coding_plan",
         envVar: "DASHSCOPE_CODING_API_KEY",
         extraModels: [
-          { provider: "qwen-coding", modelId: "qwen3.5-plus", displayName: "Qwen3.5 Plus" },
+          { provider: "qwen-coding", modelId: "qwen3.5-plus", displayName: "Qwen3.5 Plus", supportsVision: true },
           { provider: "qwen-coding", modelId: "qwen3-max-2026-01-23", displayName: "Qwen3 Max" },
           { provider: "qwen-coding", modelId: "qwen3-coder-next", displayName: "Qwen3 Coder Next" },
           { provider: "qwen-coding", modelId: "qwen3-coder-plus", displayName: "Qwen3 Coder Plus" },
           { provider: "qwen-coding", modelId: "MiniMax-M2.5", displayName: "MiniMax M2.5" },
           { provider: "qwen-coding", modelId: "glm-5", displayName: "GLM-5" },
           { provider: "qwen-coding", modelId: "glm-4.7", displayName: "GLM-4.7" },
-          { provider: "qwen-coding", modelId: "kimi-k2.5", displayName: "Kimi K2.5" },
+          { provider: "qwen-coding", modelId: "kimi-k2.5", displayName: "Kimi K2.5", supportsVision: true },
         ],
       },
       {
@@ -655,6 +655,7 @@ export const PROVIDERS: Record<RootProvider, ProviderMeta> = {
         modelId: "doubao-seed-1-6-lite-251015",
         displayName: "Doubao Seed 1.6 Lite",
         cost: { input: cny(0.4), output: cny(4), cacheRead: 0, cacheWrite: 0 },
+        supportsVision: true,
       },
       {
         provider: "volcengine",

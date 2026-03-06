@@ -833,6 +833,13 @@ describe("config-writer", () => {
       expect(glm45v?.input).toEqual(["text", "image"]);
       const doubao18 = configs.volcengine.models.find((m) => m.id === "doubao-seed-1-8-251228");
       expect(doubao18?.input).toEqual(["text", "image"]);
+      const doubaoLite = configs.volcengine.models.find((m) => m.id === "doubao-seed-1-6-lite-251015");
+      expect(doubaoLite?.input).toEqual(["text", "image"]);
+      // qwen-coding vision models
+      const qwen35plus = configs["qwen-coding"].models.find((m) => m.id === "qwen3.5-plus");
+      expect(qwen35plus?.input).toEqual(["text", "image"]);
+      const kimiK25Coding = configs["qwen-coding"].models.find((m) => m.id === "kimi-k2.5");
+      expect(kimiK25Coding?.input).toEqual(["text", "image"]);
     });
 
     it("sets input to text-only for non-vision models", () => {
