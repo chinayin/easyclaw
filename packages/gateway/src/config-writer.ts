@@ -68,14 +68,7 @@ function stripUnknownKeys(config: Record<string, unknown>): string[] {
  * EasyClaw-managed top-level keys are protected — if the schema rejects
  * something we wrote ourselves, that's a bug we should surface, not hide.
  */
-/** Top-level config keys managed by EasyClaw — never deleted by fixSemanticErrors. */
-export const EASYCLAW_MANAGED_KEYS = new Set([
-  "gateway", "tools", "commands", "agents", "plugins",
-  "skills", "models", "browser", "session",
-]);
-
 function fixSemanticErrors(config: Record<string, unknown>): string[] {
-  const PROTECTED = EASYCLAW_MANAGED_KEYS;
   const allRemoved: string[] = [];
 
   for (let pass = 0; pass < 20; pass++) {
@@ -90,36 +83,33 @@ function fixSemanticErrors(config: Record<string, unknown>): string[] {
     let progress = false;
     for (const issue of issues) {
       const path = [...issue.path];
-      if (path.length === 0) continue;
-      if (PROTECTED.has(String(path[0]))) continue;
+      // Need at least depth 2: never delete a top-level key, only leaves.
+      if (path.length <= 1) continue;
 
-      // Try to delete from the leaf upward until we find an existing key.
-      while (path.length > 0) {
-        const keyToDelete = String(path[path.length - 1]);
-        const parentPath = path.slice(0, -1);
+      // Only attempt to delete the exact leaf the error points to.
+      // If the leaf doesn't exist in the config (e.g. a required-but-
+      // missing field), give up — never escalate upward.
+      const keyToDelete = String(path[path.length - 1]);
+      const parentPath = path.slice(0, -1);
 
-        let parent: unknown = config;
-        for (const seg of parentPath) {
-          if (parent == null || typeof parent !== "object") {
-            parent = null;
-            break;
-          }
-          parent = (parent as Record<PropertyKey, unknown>)[seg];
-        }
-
-        if (
-          parent != null &&
-          typeof parent === "object" &&
-          !Array.isArray(parent) &&
-          keyToDelete in (parent as Record<string, unknown>)
-        ) {
-          delete (parent as Record<string, unknown>)[keyToDelete];
-          allRemoved.push([...parentPath, keyToDelete].join("."));
-          progress = true;
+      let parent: unknown = config;
+      for (const seg of parentPath) {
+        if (parent == null || typeof parent !== "object") {
+          parent = null;
           break;
         }
+        parent = (parent as Record<PropertyKey, unknown>)[seg];
+      }
 
-        path.pop();
+      if (
+        parent != null &&
+        typeof parent === "object" &&
+        !Array.isArray(parent) &&
+        keyToDelete in (parent as Record<string, unknown>)
+      ) {
+        delete (parent as Record<string, unknown>)[keyToDelete];
+        allRemoved.push(path.join("."));
+        progress = true;
       }
 
       // Re-parse after each deletion to avoid cascading mis-deletions.
@@ -131,6 +121,9 @@ function fixSemanticErrors(config: Record<string, unknown>): string[] {
 
   return allRemoved;
 }
+
+/** Plugin IDs that have been permanently removed from the project. */
+const REMOVED_PLUGIN_IDS = new Set(["wecom", "dingtalk"]);
 
 /**
  * Find the monorepo root by looking for pnpm-workspace.yaml
@@ -700,8 +693,21 @@ export function writeGatewayConfig(options: WriteGatewayConfigOptions): string {
           ? (merged.entries as Record<string, unknown>)
           : {};
       delete existingEntries["search-browser-fallback"];
+      for (const id of REMOVED_PLUGIN_IDS) delete existingEntries[id];
       if (Object.keys(existingEntries).length > 0) {
         merged.entries = existingEntries;
+      }
+
+      // Remove permanently-removed plugin IDs from the allowlist to prevent
+      // gateway startup failures (e.g. wecom was removed in v2026.3).
+      if (Array.isArray(merged.allow)) {
+        const before = merged.allow as string[];
+        const after = before.filter((id) => !REMOVED_PLUGIN_IDS.has(id));
+        const removed = before.filter((id) => REMOVED_PLUGIN_IDS.has(id));
+        if (removed.length > 0) {
+          log.warn(`Removed stale plugin IDs from plugins.allow: ${removed.join(", ")}`);
+        }
+        merged.allow = after;
       }
     }
 

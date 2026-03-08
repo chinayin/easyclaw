@@ -104,7 +104,6 @@ export function createGatewayConfigBuilder(deps: GatewayConfigDeps) {
           "easyclaw-tools",
           "easyclaw-file-permissions",
           "search-browser-fallback",
-          "wecom",
           "google-gemini-cli-auth",
           "mobile-chat-channel",
         ],

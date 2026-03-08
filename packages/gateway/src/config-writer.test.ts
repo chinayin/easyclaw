@@ -11,7 +11,6 @@ import {
   generateGatewayToken,
   buildExtraProviderConfigs,
   DEFAULT_GATEWAY_PORT,
-  EASYCLAW_MANAGED_KEYS,
 } from "./config-writer.js";
 import { OpenClawSchema } from "../../../vendor/openclaw/src/config/zod-schema.js";
 
@@ -179,7 +178,7 @@ describe("config-writer", () => {
         configPath,
         JSON.stringify({
           logging: { level: "debug" },
-          gateway: { port: 1234, mode: "single" },
+          gateway: { port: 1234, mode: "local" },
           ui: { seamColor: "#ff0000" },
         }),
       );
@@ -198,7 +197,7 @@ describe("config-writer", () => {
       // Known user fields are preserved
       expect(config.logging).toEqual({ level: "debug" });
       expect(config.ui).toEqual({ seamColor: "#ff0000" });
-      expect(config.gateway.mode).toBe("single");
+      expect(config.gateway.mode).toBe("local");
     });
 
     it("preserves existing skills fields when adding extraDirs", () => {
@@ -207,7 +206,7 @@ describe("config-writer", () => {
         configPath,
         JSON.stringify({
           skills: {
-            allowBundled: true,
+            allowBundled: ["web-search"],
             load: {
               watch: true,
             },
@@ -221,7 +220,7 @@ describe("config-writer", () => {
       });
 
       const config = JSON.parse(readFileSync(configPath, "utf-8"));
-      expect(config.skills.allowBundled).toBe(true);
+      expect(config.skills.allowBundled).toEqual(["web-search"]);
       expect(config.skills.load.watch).toBe(true);
       expect(config.skills.load.extraDirs).toEqual(["/new/dir"]);
     });
@@ -232,7 +231,7 @@ describe("config-writer", () => {
         configPath,
         JSON.stringify({
           gateway: { port: 1234 },
-          plugins: ["/old-plugin"],
+          plugins: { load: { paths: ["/old-plugin"] } },
         }),
       );
 
@@ -244,8 +243,8 @@ describe("config-writer", () => {
 
       const config = JSON.parse(readFileSync(configPath, "utf-8"));
       expect(config.gateway.port).toBe(5678);
-      // plugins was not passed, so it should remain as-is
-      expect(config.plugins).toEqual(["/old-plugin"]);
+      // plugins was not passed, so existing load paths should be preserved
+      expect(config.plugins.load.paths).toContain("/old-plugin");
     });
 
     it("is idempotent - calling twice produces same result", () => {
@@ -534,6 +533,36 @@ describe("config-writer", () => {
       expect(paths).toContain("/some/other/plugin");
       // New unified extensions dir added
       expect(paths).toContain(extDir);
+    });
+
+    it("filters permanently-removed plugin IDs from plugins.allow", () => {
+      const configPath = join(tmpDir, "openclaw.json");
+      const extDir = join(tmpDir, "extensions");
+      mkdirSync(extDir);
+
+      // Pre-populate config with allow list containing removed plugin IDs
+      writeFileSync(
+        configPath,
+        JSON.stringify({
+          plugins: {
+            allow: ["my-real-plugin", "wecom", "dingtalk", "telegram"],
+          },
+        }),
+      );
+
+      writeGatewayConfig({
+        configPath,
+        extensionsDir: extDir,
+      });
+
+      const config = JSON.parse(readFileSync(configPath, "utf-8"));
+      const allow = config.plugins.allow as string[];
+      // Non-removed plugins should be kept
+      expect(allow).toContain("my-real-plugin");
+      expect(allow).toContain("telegram");
+      // Permanently-removed plugins should be filtered out
+      expect(allow).not.toContain("wecom");
+      expect(allow).not.toContain("dingtalk");
     });
 
     it("does not duplicate extensionsDir on idempotent calls", () => {
@@ -951,7 +980,7 @@ describe("config-writer", () => {
   });
 
   describe("writeGatewayConfig - semantic validation fix", () => {
-    it("removes channel config when dmPolicy=allowlist but allowFrom is missing", () => {
+    it("preserves channel config even when it has semantic errors", () => {
       const configPath = join(tmpDir, "openclaw.json");
       writeFileSync(
         configPath,
@@ -965,14 +994,13 @@ describe("config-writer", () => {
       writeGatewayConfig({ configPath, gatewayPort: 18789 });
 
       const config = JSON.parse(readFileSync(configPath, "utf-8"));
-      // The telegram block should be removed because the semantic error
-      // (allowlist requires allowFrom) cannot be fixed by deleting a leaf.
-      expect(config.channels?.telegram).toBeUndefined();
-      // Gateway config should still be intact
+      // Channel configs are protected — fixSemanticErrors must never delete
+      // user channel data, even if it has validation issues.
+      expect(config.channels.telegram.botToken).toBe("123:ABC");
       expect(config.gateway.port).toBe(18789);
     });
 
-    it("preserves valid channel config alongside broken one", () => {
+    it("preserves all channel configs including ones with errors", () => {
       const configPath = join(tmpDir, "openclaw.json");
       writeFileSync(
         configPath,
@@ -987,7 +1015,7 @@ describe("config-writer", () => {
       writeGatewayConfig({ configPath, gatewayPort: 18789 });
 
       const config = JSON.parse(readFileSync(configPath, "utf-8"));
-      expect(config.channels?.telegram).toBeUndefined();
+      expect(config.channels.telegram.botToken).toBe("123:ABC");
       expect(config.channels.discord.token).toBe("discord-tok");
     });
 
@@ -1094,34 +1122,6 @@ describe("config-writer", () => {
   });
 
   describe("fixSemanticErrors guard tests", () => {
-    it("EASYCLAW_MANAGED_KEYS covers all top-level keys written by writeGatewayConfig", () => {
-      // If this test fails, you added a new top-level key in writeGatewayConfig
-      // but forgot to add it to EASYCLAW_MANAGED_KEYS. Without it, that key
-      // could be deleted when fixSemanticErrors encounters unrelated errors.
-      const configPath = join(tmpDir, "openclaw.json");
-      writeGatewayConfig({
-        configPath,
-        gatewayPort: 18789,
-        gatewayToken: "test-token",
-        enableChatCompletions: true,
-        commandsRestart: true,
-        plugins: { entries: {} },
-        extraSkillDirs: [],
-        skipBootstrap: true,
-        browserMode: "standalone",
-        defaultModel: { provider: "openai", modelId: "gpt-4o" },
-      });
-
-      const config = JSON.parse(readFileSync(configPath, "utf-8"));
-      const writtenKeys = Object.keys(config);
-      const unprotected = writtenKeys.filter((k) => !EASYCLAW_MANAGED_KEYS.has(k));
-      expect(
-        unprotected,
-        `These top-level keys are written by writeGatewayConfig but missing from EASYCLAW_MANAGED_KEYS: ${unprotected.join(", ")}. ` +
-        "Add them to EASYCLAW_MANAGED_KEYS so fixSemanticErrors won't delete them.",
-      ).toEqual([]);
-    });
-
     it("default config from ensureGatewayConfig passes OpenClaw schema validation", () => {
       // If this test fails, vendor (OpenClaw) schema changed and our default
       // config is no longer valid. Update writeGatewayConfig/ensureGatewayConfig
