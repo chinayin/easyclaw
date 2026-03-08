@@ -360,8 +360,16 @@ export class MobileSyncEngine {
                 break;
 
             case "reaction":
-                // Mobile user reacted to a message — log for now
                 console.log(`[MobileSync:${this.pairingId.slice(0,8)}] Received reaction from mobile: ${msg.emoji} on ${msg.targetId?.slice(0,8)}`);
+                if (this.gatewayBroadcast && msg.targetId && msg.emoji) {
+                    this.gatewayBroadcast("mobile.reaction", {
+                        pairingId: this.pairingId,
+                        targetId: msg.targetId,
+                        emoji: msg.emoji,
+                        sender: msg.sender || "mobile",
+                        timestamp: msg.timestamp || Date.now(),
+                    });
+                }
                 break;
 
             case "reset_req":
