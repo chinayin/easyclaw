@@ -22,6 +22,11 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const {
+  EXTERNAL_PACKAGES,
+  isAllowlistedVendorRuntimeSpecifier,
+  matchesExternalPackage,
+} = require("./vendor-runtime-packages.cjs");
 
 const TAG = "[verify-vendor-bundle]";
 const vendorDir = path.resolve(__dirname, "..", "vendor", "openclaw");
@@ -29,33 +34,8 @@ const distDir = path.join(vendorDir, "dist");
 const nmDir = path.join(vendorDir, "node_modules");
 const extensionsDir = path.join(vendorDir, "extensions");
 
-// ─── Import constants and helpers from bundle-vendor-deps.cjs ───
-// We reference the original script's path but extract constants directly
-// to avoid running its top-level code.
-
-const EXTERNAL_PACKAGES = [
-  // Native modules
-  "sharp", "@img/*", "koffi",
-  "@napi-rs/canvas", "@napi-rs/canvas-*",
-  "@lydell/node-pty", "@lydell/node-pty-*",
-  "@matrix-org/matrix-sdk-crypto-nodejs",
-  "@discordjs/opus",
-  "sqlite-vec", "sqlite-vec-*",
-  "better-sqlite3",
-  "@snazzah/*",
-  "@lancedb/lancedb", "@lancedb/lancedb-*",
-  // Complex dynamic loading
-  "ajv", "protobufjs", "protobufjs/*",
-  "playwright-core", "playwright", "chromium-bidi", "chromium-bidi/*",
-  // Optional/missing
-  "ffmpeg-static", "authenticate-pam", "esbuild", "node-llama-cpp",
-  // Proxy dependency
-  "undici",
-  // Feishu SDK is resolved from the app workspace at runtime.
-  "@larksuiteoapi/node-sdk",
-  // Schema library shared with plugins
-  "@sinclair/typebox", "@sinclair/typebox/*",
-];
+// Shared single-source allowlist of packages that must survive runtime
+// resolution after vendor pruning/bundling.
 
 const NODE_BUILTINS = new Set([
   "assert", "async_hooks", "buffer", "child_process", "cluster", "console",
@@ -233,13 +213,25 @@ function extractPkgName(/** @type {string} */ importPath) {
 /**
  * Check if a package matches an EXTERNAL_PACKAGES pattern.
  */
-function matchesExternalPattern(/** @type {string} */ name) {
-  for (const pattern of EXTERNAL_PACKAGES) {
-    if (pattern === name) return true;
-    if (pattern.endsWith("/*") && name.startsWith(pattern.slice(0, -1))) return true;
-    if (pattern.endsWith("-*") && name.startsWith(pattern.slice(0, -1))) return true;
+const VENDOR_RUNTIME_LOADER_PATTERNS = {
+  requireCall: /(?:^|[^\w$.])require\(\s*["']([^"']+)["']\s*\)/g,
+  requireResolve: /require\.resolve\(\s*["']([^"']+)["']\s*\)/g,
+  createRequireCall: /createRequire\([^)]*\)\(\s*["']([^"']+)["']\s*\)/g,
+  moduleCreateRequireCall: /module\.createRequire\([^)]*\)\(\s*["']([^"']+)["']\s*\)/g,
+};
+
+function escapeRegex(/** @type {string} */ literal) {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function extractCreateRequireAliases(/** @type {string} */ code) {
+  const aliases = new Set();
+  const aliasRe = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:createRequire|module\.createRequire)\(/g;
+  let match;
+  while ((match = aliasRe.exec(code)) !== null) {
+    aliases.add(match[1]);
   }
-  return false;
+  return [...aliases];
 }
 
 // ─── Phase 0.5b: Dry-run extension pre-bundling ───
@@ -572,7 +564,7 @@ function verifyExternalImports(
 
   for (const pkg of [...allExternals].sort()) {
     if (isNodeBuiltin(pkg)) continue;
-    if (!matchesExternalPattern(pkg)) continue;
+    if (!matchesExternalPackage(pkg)) continue;
     if (!keepSet.has(pkg)) {
       skippedNeverInstalled++;
       continue;
@@ -596,6 +588,90 @@ function verifyExternalImports(
         (skippedNeverInstalled > 0 ? ` (${skippedNeverInstalled} optional/never-installed skipped)` : ""),
     );
   }
+}
+
+// ─── Phase 4.25: Verify vendor runtime loader allowlist ───
+
+function verifyVendorRuntimeLoaderAllowlist() {
+  const phase = "Phase 4.25 (vendor runtime loaders)";
+  const vendorExtDir = path.join(vendorDir, "extensions");
+  if (!fs.existsSync(vendorExtDir)) {
+    skip(phase, "vendor extensions directory not found");
+    return;
+  }
+
+  /** @type {Map<string, string[]>} */
+  const missing = new Map();
+  let scannedSpecifiers = 0;
+  let allowlistedSpecifiers = 0;
+
+  /** @param {string} dir */
+  function walk(dir) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(fullPath);
+        continue;
+      }
+      if (!/\.(?:[cm]?js|[mc]?ts)$/.test(entry.name)) continue;
+      if (/\.(?:test|spec)\./.test(entry.name)) continue;
+      if (/\.d\.[mc]?ts$/.test(entry.name)) continue;
+
+      const code = fs.readFileSync(fullPath, "utf-8");
+      const relPath = path.relative(vendorDir, fullPath);
+
+      /** @type {Array<[string, RegExp]>} */
+      const patterns = Object.entries(VENDOR_RUNTIME_LOADER_PATTERNS);
+      for (const alias of extractCreateRequireAliases(code)) {
+        patterns.push([
+          "createRequireAliasCall",
+          new RegExp(`(?:^|[^\\w$.])${escapeRegex(alias)}\\(\\s*["']([^"']+)["']\\s*\\)`, "g"),
+        ]);
+        patterns.push([
+          "createRequireAliasResolve",
+          new RegExp(`${escapeRegex(alias)}\\.resolve\\(\\s*["']([^"']+)["']\\s*\\)`, "g"),
+        ]);
+      }
+
+      for (const [kind, pattern] of patterns) {
+        pattern.lastIndex = 0;
+        let match;
+        while ((match = pattern.exec(code)) !== null) {
+          const spec = match[1];
+          if (isNodeBuiltin(spec) || spec.startsWith(".") || spec.startsWith("node:")) {
+            continue;
+          }
+          scannedSpecifiers++;
+          if (isAllowlistedVendorRuntimeSpecifier(spec)) {
+            allowlistedSpecifiers++;
+            continue;
+          }
+          const key = `${kind}:${spec}`;
+          const sources = missing.get(key) ?? [];
+          if (!sources.includes(relPath)) sources.push(relPath);
+          missing.set(key, sources);
+        }
+      }
+    }
+  }
+
+  walk(vendorExtDir);
+
+  if (missing.size > 0) {
+    const details = [...missing.entries()]
+      .map(([spec, sources]) => `${spec} from ${sources.join(", ")}`)
+      .join("; ");
+    fail(
+      phase,
+      `${missing.size} runtime-loaded package(s) are not in the shared allowlist: ${details}`,
+    );
+    return;
+  }
+
+  pass(
+    phase,
+    `${allowlistedSpecifiers}/${scannedSpecifiers} runtime-loaded vendor specifiers matched the shared allowlist`,
+  );
 }
 
 // ─── Phase 5: Smoke test gateway startup ───
@@ -732,6 +808,9 @@ function smokeTestGateway() {
 
   // Phase 4: Keep-set simulation (read-only)
   const keepSet = verifyKeepSet();
+
+  // Phase 4.25: Vendor runtime loader allowlist verification (read-only)
+  verifyVendorRuntimeLoaderAllowlist();
 
   // Phase 4.5: External import verification (read-only)
   const allExternals = new Set([...extExternals, ...bundleExternals]);

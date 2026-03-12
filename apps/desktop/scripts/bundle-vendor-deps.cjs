@@ -19,6 +19,10 @@
 
 const fs = require("fs");
 const path = require("path");
+const {
+  EXTERNAL_PACKAGES,
+  RUNTIME_REQUIRED_PACKAGES,
+} = require("../../../scripts/vendor-runtime-packages.cjs");
 
 const vendorDir = path.resolve(__dirname, "..", "..", "..", "vendor", "openclaw");
 const distDir = path.join(vendorDir, "dist");
@@ -29,66 +33,8 @@ const extStagingDir = path.resolve(__dirname, "..", ".prebundled-extensions");
 const ENTRY_FILE = path.join(distDir, "entry.js");
 const BUNDLE_TEMP_DIR = path.join(distDir, "_bundled");
 
-// ─── External packages: cannot be bundled by esbuild ───
-// Native modules (.node binaries), complex dynamic loaders, and undici
-// (needed by proxy-setup.cjs via createRequire at runtime).
-// Used for BOTH the main entry.js bundle AND per-extension bundles.
-const EXTERNAL_PACKAGES = [
-  // OpenAI Codex OAuth dynamically loads loginOpenAICodex from pi-ai at
-  // runtime in the Electron main process. Even though model catalog data is
-  // extracted statically below, the package itself must remain available in
-  // packaged builds.
-  "@mariozechner/pi-ai",
-
-  // Native modules (contain .node or .dylib binaries)
-  "sharp",
-  "@img/*",
-  "koffi",
-  "@napi-rs/canvas",
-  "@napi-rs/canvas-*",
-  "@lydell/node-pty",
-  "@lydell/node-pty-*",
-  "@matrix-org/matrix-sdk-crypto-nodejs",
-  "@discordjs/opus",
-  "sqlite-vec",
-  "sqlite-vec-*",
-  "better-sqlite3",
-  "@snazzah/*",
-  "@lancedb/lancedb",
-  "@lancedb/lancedb-*",
-
-  // Complex dynamic loading patterns (runtime fs access, .proto files, etc.)
-  "ajv",
-  "protobufjs",
-  "protobufjs/*",
-  "playwright-core",
-  "playwright",
-  "chromium-bidi",
-  "chromium-bidi/*",
-
-  // Optional/missing (may not be installed, referenced in try/catch)
-  "ffmpeg-static",
-  "authenticate-pam",
-  "esbuild",
-  "node-llama-cpp",
-
-  // Proxy dependency (needed by proxy-setup.cjs via createRequire)
-  "undici",
-
-  // Feishu SDK is resolved from the app workspace at runtime.
-  "@larksuiteoapi/node-sdk",
-
-  // Schema library used by both bundled code AND plugins loaded at runtime.
-  // Must stay in node_modules so plugins can resolve it.
-  "@sinclair/typebox",
-  "@sinclair/typebox/*",
-];
-
-// Some packages are loaded via dynamic require() paths that esbuild cannot see
-// from the bundled entrypoints. These still need to survive Phase 4 cleanup.
-const RUNTIME_REQUIRED_PACKAGES = [
-  "@mariozechner/pi-ai",
-];
+// Shared single-source allowlist of packages that must survive runtime
+// resolution after vendor pruning/bundling.
 
 // Path to the static vendor model catalog JSON that replaces the dynamic
 // import of @mariozechner/pi-ai/dist/models.generated.js at runtime for model

@@ -1,78 +1,177 @@
 #!/usr/bin/env node
-// Smoke test: verify that EasyClaw extension bundles have no unresolvable
-// external imports.  In packaged Electron builds, extensions/*/node_modules
-// is stripped by electron-builder, so every non-node: import must be either
-// a relative path (./…) or bundled inline by tsdown.
-//
-// Checks the full import chain starting from each extension's gateway entry
-// point (openclaw-plugin.mjs or the openclaw.extensions paths in package.json).
-//
-// Run after `pnpm build` in each extension (or the monorepo-wide build).
-// Exit code 0 = clean, 1 = leaked externals found.
+// Smoke test: verify that EasyClaw extension entry graphs do not contain
+// unbundled external npm imports. In packaged Electron builds,
+// extensions/*/node_modules is stripped, so every non-node import reachable
+// from an extension entrypoint must be either relative or bundled inline.
 
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { execSync } from "node:child_process";
-import { join, resolve, dirname } from "node:path";
+import { createRequire } from "node:module";
+import { join, resolve, dirname, extname } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..");
-const EXTENSIONS_DIR = join(ROOT, "extensions");
+const require = createRequire(import.meta.url);
+const { isAllowlistedVendorRuntimeSpecifier } = require("./vendor-runtime-packages.cjs");
+const EXTENSION_ROOTS = [
+  {
+    label: "workspace",
+    dir: join(ROOT, "extensions"),
+    mode: "strict",
+  },
+  {
+    label: "vendor",
+    dir: join(ROOT, "vendor", "openclaw", "extensions"),
+    mode: "vendor-runtime",
+  },
+];
 
-// Regex: top-level static import/export … from "specifier"
-const IMPORT_RE = /(?:^|\n)\s*(?:import|export)\s+.*?\s+from\s+["']([^"']+)["']/g;
-// Dynamic import()
-const DYNAMIC_RE = /import\(\s*["']([^"']+)["']\s*\)/g;
+const SPECIFIER_PATTERNS = {
+  staticImport: /(?:^|\n)\s*(?:import|export)\s+.*?\s+from\s+["']([^"']+)["']/g,
+  dynamicImport: /import\(\s*["']([^"']+)["']\s*\)/g,
+  requireCall: /(?:^|[^\w$.])require\(\s*["']([^"']+)["']\s*\)/g,
+  requireResolve: /require\.resolve\(\s*["']([^"']+)["']\s*\)/g,
+  createRequireCall: /createRequire\([^)]*\)\(\s*["']([^"']+)["']\s*\)/g,
+  moduleCreateRequireCall: /module\.createRequire\([^)]*\)\(\s*["']([^"']+)["']\s*\)/g,
+};
 
-function isAllowedSpecifier(spec) {
-  if (spec.startsWith("node:")) return true;
-  if (spec.startsWith(".")) return true;
-  return false;
+function isAllowedWorkspaceSpecifier(spec) {
+  return spec === "openclaw/plugin-sdk" || spec.startsWith("openclaw/plugin-sdk/");
 }
 
-function extractSpecifiers(filePath) {
+function isAllowedSpecifier(spec) {
+  return spec.startsWith("node:") || spec.startsWith(".");
+}
+
+function escapeRegex(literal) {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function extractCreateRequireAliases(code) {
+  const aliases = new Set();
+  const aliasRe = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:createRequire|module\.createRequire)\(/g;
+  let match;
+  while ((match = aliasRe.exec(code)) !== null) {
+    aliases.add(match[1]);
+  }
+  return [...aliases];
+}
+
+function extractSpecifiers(filePath, mode) {
   const code = readFileSync(filePath, "utf-8");
-  const specs = [];
-  for (const re of [IMPORT_RE, DYNAMIC_RE]) {
+  const records = [];
+  const activeKinds = mode === "vendor-runtime"
+    ? ["requireCall", "requireResolve", "createRequireCall", "moduleCreateRequireCall"]
+    : ["staticImport", "dynamicImport"];
+
+  for (const kind of activeKinds) {
+    const re = SPECIFIER_PATTERNS[kind];
     re.lastIndex = 0;
-    let m;
-    while ((m = re.exec(code)) !== null) {
-      specs.push(m[1]);
+    let match;
+    while ((match = re.exec(code)) !== null) {
+      records.push({ kind, spec: match[1] });
     }
   }
-  return specs;
+
+  if (mode === "vendor-runtime") {
+    for (const alias of extractCreateRequireAliases(code)) {
+      const aliasCallRe = new RegExp(`(?:^|[^\\w$.])${escapeRegex(alias)}\\(\\s*["']([^"']+)["']\\s*\\)`, "g");
+      const aliasResolveRe = new RegExp(`${escapeRegex(alias)}\\.resolve\\(\\s*["']([^"']+)["']\\s*\\)`, "g");
+      for (const [kind, re] of [
+        ["createRequireAliasCall", aliasCallRe],
+        ["createRequireAliasResolve", aliasResolveRe],
+      ]) {
+        let match;
+        while ((match = re.exec(code)) !== null) {
+          records.push({ kind, spec: match[1] });
+        }
+      }
+    }
+  }
+
+  return records;
+}
+
+function resolveRelativeTarget(sourceFile, spec) {
+  const base = resolve(dirname(sourceFile), spec);
+  const candidates = [
+    base,
+    `${base}.mjs`,
+    `${base}.js`,
+    `${base}.ts`,
+    `${base}.mts`,
+    `${base}.cjs`,
+    join(base, "index.mjs"),
+    join(base, "index.js"),
+    join(base, "index.ts"),
+    join(base, "index.mts"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+  }
+  return null;
+}
+
+function collectEntryPoints(extDir) {
+  const entryPoints = [];
+  const pkgPath = join(extDir, "package.json");
+  if (existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+      const exts = pkg.openclaw?.extensions;
+      if (Array.isArray(exts)) {
+        for (const ext of exts) {
+          const entry = resolve(extDir, ext);
+          if (existsSync(entry)) entryPoints.push(entry);
+        }
+      }
+    } catch {}
+  }
+
+  for (const fallback of ["openclaw-plugin.mjs", "index.ts", "index.mjs", "index.js"]) {
+    const entry = join(extDir, fallback);
+    if (existsSync(entry)) entryPoints.push(entry);
+  }
+
+  return [...new Set(entryPoints)];
 }
 
 /** Recursively walk the import graph from an entry file, collecting external imports. */
-function walkImports(entryPath, extDir) {
-  const externals = new Map(); // specifier -> [source files]
+function walkImports(entryPath, extDir, mode) {
+  const externals = new Map();
   const visited = new Set();
 
   function visit(filePath) {
     const resolved = resolve(filePath);
-    if (visited.has(resolved)) return;
-    if (!existsSync(resolved)) return;
+    if (visited.has(resolved) || !existsSync(resolved)) return;
+    if (!statSync(resolved).isFile()) return;
     visited.add(resolved);
 
-    for (const spec of extractSpecifiers(resolved)) {
-      if (spec.startsWith("node:")) continue;
-      if (spec.startsWith(".")) {
-        // Follow relative imports within the extension
-        let target = resolve(dirname(resolved), spec);
-        // Try with .mjs extension if not found
-        if (!existsSync(target) && !target.endsWith(".mjs") && !target.endsWith(".js")) {
-          if (existsSync(target + ".mjs")) target += ".mjs";
-          else if (existsSync(target + ".js")) target += ".js";
-        }
-        // Only follow files within the extension dir
-        if (target.startsWith(extDir) && existsSync(target)) {
-          visit(target);
+    // Ignore type declaration files in case an entry root references them.
+    if (/\.d\.[mc]?ts$/.test(resolved)) return;
+
+    for (const { kind, spec } of extractSpecifiers(resolved, mode)) {
+      if (isAllowedSpecifier(spec)) {
+        if (spec.startsWith(".")) {
+          const target = resolveRelativeTarget(resolved, spec);
+          if (target && target.startsWith(extDir)) visit(target);
         }
         continue;
       }
-      // External import
-      const sources = externals.get(spec) ?? [];
+
+      if (mode === "vendor-runtime" && isAllowlistedVendorRuntimeSpecifier(spec)) {
+        continue;
+      }
+
+      if (mode === "strict" && isAllowedWorkspaceSpecifier(spec)) {
+        continue;
+      }
+
+      const key = mode === "vendor-runtime" ? `${kind}:${spec}` : spec;
+      const sources = externals.get(key) ?? [];
       const rel = resolved.slice(extDir.length + 1);
-      if (!sources.includes(rel)) sources.push(rel);
-      externals.set(spec, sources);
+      const label = mode === "vendor-runtime" ? `${rel} via ${kind}` : rel;
+      if (!sources.includes(label)) sources.push(label);
+      externals.set(key, sources);
     }
   }
 
@@ -82,60 +181,47 @@ function walkImports(entryPath, extDir) {
 
 let failed = false;
 
-for (const name of readdirSync(EXTENSIONS_DIR)) {
-  const extDir = join(EXTENSIONS_DIR, name);
-  if (!statSync(extDir).isDirectory()) continue;
+for (const { label, dir: rootDir, mode } of EXTENSION_ROOTS) {
+  if (!existsSync(rootDir)) continue;
 
-  // Determine entry points: from package.json openclaw.extensions, fallback to openclaw-plugin.mjs
-  const entryPoints = [];
-  const pkgPath = join(extDir, "package.json");
-  if (existsSync(pkgPath)) {
-    try {
-      const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-      const exts = pkg.openclaw?.extensions;
-      if (Array.isArray(exts)) {
-        for (const ext of exts) {
-          const p = resolve(extDir, ext);
-          if (existsSync(p)) entryPoints.push(p);
-        }
+  for (const name of readdirSync(rootDir)) {
+    const extDir = join(rootDir, name);
+    if (!statSync(extDir).isDirectory()) continue;
+
+    const entryPoints = collectEntryPoints(extDir);
+    if (entryPoints.length === 0) continue;
+
+    for (const entry of entryPoints) {
+      // Only scan source-like entry files; dist bundle files are checked elsewhere.
+      const ext = extname(entry);
+      if (![".ts", ".mts", ".js", ".mjs", ".cjs"].includes(ext)) continue;
+
+      const externals = walkImports(entry, extDir, mode);
+      if (externals.size > 0) {
+        const rel = entry.slice(extDir.length + 1);
+        const details = [...externals.entries()]
+          .map(([spec, sources]) => `  ${spec} (from ${sources.join(", ")})`)
+          .join("\n");
+        console.error(`FAIL  ${label}:${name}/${rel}\n${details}`);
+        failed = true;
       }
-    } catch { /* ignore */ }
-  }
-  if (entryPoints.length === 0) {
-    const fallback = join(extDir, "openclaw-plugin.mjs");
-    if (existsSync(fallback)) entryPoints.push(fallback);
-  }
-  if (entryPoints.length === 0) continue;
-
-  for (const entry of entryPoints) {
-    const externals = walkImports(entry, extDir);
-    if (externals.size > 0) {
-      const rel = entry.slice(extDir.length + 1);
-      const details = [...externals.entries()]
-        .map(([spec, sources]) => `  ${spec} (from ${sources.join(", ")})`)
-        .join("\n");
-      console.error(`FAIL  ${name}/${rel}\n${details}`);
-      failed = true;
     }
   }
 }
 
 if (failed) {
   console.error(
-    "\nExtension bundles must not have external npm imports.\n" +
-    "In packaged builds, extensions/*/node_modules is stripped.\n" +
-    "Fix: add the dependency to noExternal/inlineOnly in tsdown.config.ts,\n" +
-    "or replace the import with a local definition.\n"
+    "\nWorkspace extensions must not leak npm imports from their packaged entry graphs.\n" +
+    "Vendor extensions may use runtime loaders only for packages in the shared\n" +
+    "vendor runtime allowlist. Add genuinely required packages to the shared\n" +
+    "allowlist before bundling/pruning can strip them out.\n"
   );
   process.exit(1);
-} else {
-  console.log("OK  All extension bundles have no leaked external imports.");
 }
 
-// ─── Check 2: pnpm-lock.yaml is up to date ───
-// Catches the case where package.json dependencies were changed but
-// `pnpm install` was not run to update the lockfile.
+console.log("OK  All extension entry graphs have no leaked external imports.");
 console.log("");
+
 try {
   execSync("pnpm install --frozen-lockfile --ignore-scripts", {
     cwd: ROOT,
@@ -144,7 +230,6 @@ try {
   console.log("OK  pnpm-lock.yaml is up to date.");
 } catch (err) {
   const stderr = err.stderr?.toString() ?? "";
-  // Extract the useful pnpm error message
   const match = stderr.match(/ERR_PNPM_OUTDATED_LOCKFILE.*?\n([\s\S]*?)(?:\n\n|$)/);
   console.error("FAIL  pnpm-lock.yaml is out of date with package.json");
   if (match) {
