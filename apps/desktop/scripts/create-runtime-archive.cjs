@@ -268,6 +268,10 @@ function createStagingDir() {
       const rel = path.relative(vendorDir, src);
       // Exclude .git directories
       if (rel === ".git" || rel.startsWith(".git" + path.sep)) return false;
+      // Exclude .bin directories — they contain symlinks to CLI executables
+      // which may be broken (targets not installed). Runtime doesn't need them.
+      const base = path.basename(src);
+      if (base === ".bin" && src.includes("node_modules")) return false;
       // Exclude any node_modules/openclaw or node_modules/clawdbot directories.
       // pnpm workspace packages create symlinks/junctions like:
       //   packages/moltbot/node_modules/openclaw -> ../../..
