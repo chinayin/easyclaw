@@ -14,7 +14,7 @@ export interface ToolSelection {
   enabled: boolean;
 }
 
-const BASE = "http://127.0.0.1:3210/api/tools";
+const BASE = "/api/tools";
 
 export async function fetchAvailableTools(): Promise<AvailableTool[]> {
   const res = await fetch(`${BASE}/available`);

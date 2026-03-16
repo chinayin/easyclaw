@@ -50,7 +50,7 @@ test.describe("Extra Features Page", () => {
     // Enable STT
     const checkbox = section.locator("input[type='checkbox']");
     if (!await checkbox.isChecked()) {
-      await checkbox.check();
+      await section.locator(".extras-toggle").click();
     }
 
     // Groq should be the default provider for en locale; verify it is selected
@@ -82,7 +82,7 @@ test.describe("Extra Features Page", () => {
     // Enable web search
     const checkbox = section.locator("input[type='checkbox']");
     if (!await checkbox.isChecked()) {
-      await checkbox.check();
+      await section.locator(".extras-toggle").click();
     }
 
     // Brave should be the default provider
@@ -114,7 +114,7 @@ test.describe("Extra Features Page", () => {
     // Enable embedding
     const checkbox = section.locator("input[type='checkbox']");
     if (!await checkbox.isChecked()) {
-      await checkbox.check();
+      await section.locator(".extras-toggle").click();
     }
 
     // Select Gemini provider from dropdown
@@ -213,7 +213,7 @@ test.describe("Extra Features Page", () => {
     // Enable web search
     const checkbox = section.locator("input[type='checkbox']");
     if (!await checkbox.isChecked()) {
-      await checkbox.check();
+      await section.locator(".extras-toggle").click();
     }
 
     // Type something in the key input
@@ -244,18 +244,18 @@ test.describe("Extra Features Page", () => {
     // Enable embedding
     const checkbox = section.locator("input[type='checkbox']");
     if (!await checkbox.isChecked()) {
-      await checkbox.check();
+      await section.locator(".extras-toggle").click();
     }
 
     // Select Ollama provider
     await section.locator(".custom-select-trigger").click();
     await window.locator(".custom-select-option", { hasText: "Ollama" }).click();
 
-    // Verify info-box with "no API key needed" message is shown
-    await expect(section.locator(".info-box")).toBeVisible({ timeout: 5_000 });
+    // Verify the API key help text indicates the key is optional for Ollama
+    await expect(section.locator(".form-help").last()).toContainText(/optional/i, { timeout: 5_000 });
 
-    // Verify no password input is visible in the embedding section
-    await expect(section.locator("input[type='password']")).not.toBeVisible();
+    // Ollama key is optional — the password input is still shown but not required
+    await expect(section.locator("input[type='password']")).toBeVisible();
   });
 
   test("disable feature and save", async ({ window, apiBase }) => {
@@ -266,7 +266,7 @@ test.describe("Extra Features Page", () => {
 
     // Ensure web search is unchecked (disabled)
     if (await checkbox.isChecked()) {
-      await checkbox.uncheck();
+      await section.locator(".extras-toggle").click();
     }
 
     // Save with feature disabled — no API key validation needed

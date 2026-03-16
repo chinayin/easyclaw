@@ -108,9 +108,9 @@ test.describe("Skills Page", () => {
     await skillsBtn.click();
     await expect(skillsBtn).toHaveClass(/nav-active/);
 
-    const installedTab = window.locator(".skills-tab-bar .btn", { hasText: /Installed|已安装/ });
+    const installedTab = window.locator(".skills-tab-bar .skills-tab-btn", { hasText: /Installed|已安装/ });
     await installedTab.click();
-    await expect(installedTab).toHaveClass(/btn-outline/);
+    await expect(installedTab).toHaveClass(/skills-tab-btn-active/);
 
     // Wait for loading
     await window.locator(".text-muted").waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
@@ -170,8 +170,8 @@ test.describe("Skills Page", () => {
     await expect(window.locator("h1", { hasText: /Skills Marketplace|技能市场/ })).toBeVisible();
 
     // --- Market tab should be active by default ---
-    const marketTab = window.locator(".skills-tab-bar .btn", { hasText: /Market|市场/ });
-    await expect(marketTab).toHaveClass(/btn-outline/);
+    const marketTab = window.locator(".skills-tab-bar .skills-tab-btn", { hasText: /Market|市场/ });
+    await expect(marketTab).toHaveClass(/skills-tab-btn-active/);
 
     // Wait for skills grid to render (loading finished)
     await window.locator(".skills-grid").waitFor({ state: "visible", timeout: 30_000 });
@@ -184,17 +184,17 @@ test.describe("Skills Page", () => {
     const cardCount = await skillCards.count();
     expect(cardCount).toBeGreaterThanOrEqual(1);
 
-    // Each card should have: name, description, meta (author, version, stars, downloads), actions
+    // Each card should have: name, version (in header), description, meta (author, stars, downloads), actions
     const firstCard = skillCards.first();
     await expect(firstCard.locator(".skill-card-name")).toBeVisible();
+    await expect(firstCard.locator(".skill-card-version")).toBeVisible();
     await expect(firstCard.locator(".skill-card-desc")).toBeVisible();
     await expect(firstCard.locator(".skill-card-meta")).toBeVisible();
-    await expect(firstCard.locator(".skill-card-actions .btn")).toBeVisible();
+    await expect(firstCard.locator(".skill-card-bottom .btn")).toBeVisible();
 
-    // Meta section should contain author, version, stars, downloads
+    // Meta section should contain author, stars, downloads (version is in card header)
     const meta = firstCard.locator(".skill-card-meta");
     await expect(meta).toContainText(/by /);       // author
-    await expect(meta).toContainText(/v\d/);        // version
     await expect(meta).toContainText(/stars/);      // stars count
     await expect(meta).toContainText(/downloads/);  // download count
 
