@@ -1,5 +1,25 @@
 [
   {
+    "version": "1.7.0",
+    "date": "2026-03-16",
+    "en": [
+      "Hybrid OAuth flow for Gemini and OpenAI Codex subscriptions",
+      "Unified prompt injection and tool registry with browser profiles extension",
+      "Redesigned Extra Features page layout with improved i18n",
+      "Replaced vendor bundle with runtime archive for smaller installs",
+      "Improved ARM packaging pipeline and bootstrap UX",
+      "Numerous CI and vendor boundary stability fixes"
+    ],
+    "zh": [
+      "新增 Gemini 和 OpenAI Codex 订阅的混合 OAuth 登录",
+      "统一提示词注入和工具注册系统，新增浏览器配置扩展",
+      "重新设计「更多功能」页面布局，优化多语言支持",
+      "重构供应商依赖为运行时归档，减小安装包体积",
+      "改进 ARM 打包流程和首次启动体验",
+      "大量 CI 和供应商边界稳定性修复"
+    ]
+  },
+  {
     "version": "1.6.8",
     "date": "2026-03-14",
     "en": [
