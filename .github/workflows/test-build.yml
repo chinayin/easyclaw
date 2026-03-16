@@ -20,8 +20,8 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      - name: Setup OpenClaw vendor
-        run: ./scripts/setup-vendor.sh
+      - name: Clone OpenClaw vendor (pristine, no build)
+        run: ./scripts/setup-vendor.sh --clone-only
 
       - name: Validate vendor patch replay
         run: ./scripts/provision-vendor-patched.sh

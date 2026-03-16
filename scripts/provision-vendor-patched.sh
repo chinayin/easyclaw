@@ -82,14 +82,8 @@ if [ "$BRANCH" != "main" ]; then
   exit 1
 fi
 
-# Check for source-level modifications to tracked files. We exclude:
-# - deleted files (.gitignore removed by setup-vendor.sh)
-# - untracked files (.npmrc, dist/, node_modules/ created by setup)
-# Only actual content modifications to tracked source files should block.
-MODIFIED="$(git -C "$VENDOR_DIR" diff --name-only --diff-filter=M 2>/dev/null || true)"
-if [ -n "$MODIFIED" ]; then
-  echo "FAIL: vendor/openclaw has modified tracked files:" >&2
-  echo "$MODIFIED" | head -10 >&2
+if ! git -C "$VENDOR_DIR" diff --quiet 2>/dev/null; then
+  echo "FAIL: vendor/openclaw has unstaged changes." >&2
   exit 1
 fi
 
