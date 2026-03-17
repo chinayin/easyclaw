@@ -584,17 +584,18 @@ export function ChatPage({ onAgentNameChange }: { onAgentNameChange?: (name: str
     const timer = setInterval(() => {
       const tracker = trackerRef.current;
       const view = tracker.getView();
-      const stuck = view.isActive || externalPendingRef.current || runId !== null;
+      const stuck = view.isActive || externalPendingRef.current;
       if (stuck && Date.now() - lastActivityRef.current > WATCHDOG_TIMEOUT) {
         console.warn("[chat] watchdog: no events for 5 min — force-resetting run state");
         tracker.reset();
+        lastAgentStreamRef.current = null;
         if (externalPendingRef.current) {
           setExternalPending(false); externalPendingRef.current = false;
         }
       }
     }, WATCHDOG_INTERVAL);
     return () => clearInterval(timer);
-  }, [runId]);
+  }, []);
 
   // Re-fetch chat display settings when changed in SettingsPage.
   // ChatPage stays mounted (display:none) so the init effect won't re-run.
