@@ -795,7 +795,7 @@ function bundleWithEsbuild() {
 // channel APIs every minute — too aggressive and triggers rate limits for
 // users with multiple channels.  We replace it with 5 minutes (300s) in
 // the bundled output.  This avoids modifying vendor source while keeping
-// the fix inside EasyClaw's own build pipeline.
+// the fix inside RivonClaw's own build pipeline.
 //
 // If a future vendor update renames or removes the constant, the assertion
 // below will fail the build loudly so we notice immediately.
@@ -1287,7 +1287,7 @@ function smokeTestGateway() {
   const { execFileSync } = require("child_process");
   const os = require("os");
 
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "easyclaw-bundle-smoke-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rivonclaw-bundle-smoke-"));
   const openclawMjs = path.join(vendorDir, "openclaw.mjs");
 
   // Write a minimal config so the gateway can start.
@@ -1468,7 +1468,7 @@ function generateCompileCache() {
   );
 
   // Write a minimal config so the gateway can start (same as smoke test)
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "easyclaw-compile-cache-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rivonclaw-compile-cache-"));
   const minimalConfig = {
     gateway: { port: 59998, mode: "local" },
     models: {},
