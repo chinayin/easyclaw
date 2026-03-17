@@ -4,7 +4,7 @@
 
 import { homedir, hostname, userInfo } from "node:os";
 import { join } from "node:path";
-import { existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, renameSync, cpSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { platform } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -64,7 +64,21 @@ export async function migrateFromEasyClaw(): Promise<void> {
       renameSync(oldDir, newDir);
       log.info("Renamed ~/.easyclaw → ~/.rivonclaw");
     } else {
-      log.info("~/.rivonclaw/db.sqlite exists — skipping file move, migrating keychain only");
+      log.info("~/.rivonclaw/db.sqlite exists — skipping full directory move");
+      // Even though we can't move the whole directory, we still need to
+      // copy subdirectories that don't exist in the new location yet.
+      const oldSecrets = join(oldDir, "secrets");
+      const newSecrets = join(newDir, "secrets");
+      if (existsSync(oldSecrets) && !existsSync(newSecrets)) {
+        cpSync(oldSecrets, newSecrets, { recursive: true });
+        log.info("Copied secrets directory from ~/.easyclaw to ~/.rivonclaw");
+      }
+      const oldOpenclaw = join(oldDir, "openclaw");
+      const newOpenclaw = join(newDir, "openclaw");
+      if (existsSync(oldOpenclaw) && !existsSync(newOpenclaw)) {
+        cpSync(oldOpenclaw, newOpenclaw, { recursive: true });
+        log.info("Copied openclaw directory from ~/.easyclaw to ~/.rivonclaw");
+      }
     }
 
     // Replace "easyclaw" references in the openclaw config file
