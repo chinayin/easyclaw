@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
@@ -10,6 +9,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { createLogger } from "@easyclaw/logger";
+import tar from "tar";
 
 const log = createLogger("runtime-hydrator");
 
@@ -92,53 +92,39 @@ function countTopLevelEntries(dir: string): number {
  * newly created entries to report real progress. Pure Node.js — no
  * platform-specific commands like `du`.
  */
+/**
+ * Extract archive using the npm `tar` package (pure JS, cross-platform).
+ * System bsdtar on Windows has known issues with junctions/symlinks that
+ * cause incomplete extraction. Polls directory entries for progress reporting.
+ */
 function extractWithProgress(
   archivePath: string,
   extractDir: string,
   report: (progress: HydrateProgress) => void,
 ): Promise<void> {
-  // The runtime archive contains ~800 top-level entries after --strip-components=1
-  // (dist/, node_modules/, extensions/, openclaw.mjs, etc. with node_modules
-  // being the bulk). We use this as the denominator for progress estimation.
-  // Overestimating is fine — the bar just won't quite reach 90% before completion.
   const ESTIMATED_ENTRY_COUNT = 900;
 
-  return new Promise<void>((resolve, reject) => {
-    const child = spawn("tar", ["xzf", archivePath, "--strip-components=1", "-C", extractDir], {
-      stdio: "pipe",
-    });
+  // Poll every 2 seconds for progress
+  const pollInterval = setInterval(() => {
+    const count = countTopLevelEntries(extractDir);
+    const rawPercent = Math.min(count / ESTIMATED_ENTRY_COUNT, 1);
+    const percent = Math.round(5 + rawPercent * 85);
+    report({ phase: "extracting", message: "extracting", percent });
+  }, 2_000);
 
-    // Poll every 2 seconds: count top-level entries in extractDir as progress
-    const pollInterval = setInterval(() => {
-      const count = countTopLevelEntries(extractDir);
-      // Map to 5%-90% range (reserve 0-5% for prep, 90-100% for verify)
-      const rawPercent = Math.min(count / ESTIMATED_ENTRY_COUNT, 1);
-      const percent = Math.round(5 + rawPercent * 85);
-      report({ phase: "extracting", message: "extracting", percent });
-    }, 2_000);
-
-    const timeout = setTimeout(() => {
+  return tar
+    .extract({
+      file: archivePath,
+      cwd: extractDir,
+      strip: 1,
+    })
+    .then(() => {
       clearInterval(pollInterval);
-      child.kill("SIGTERM");
-      reject(new Error("Archive extraction timed out (5 minutes)"));
-    }, 300_000);
-
-    child.on("close", (code) => {
+    })
+    .catch((err: Error) => {
       clearInterval(pollInterval);
-      clearTimeout(timeout);
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`tar exited with code ${code}`));
-      }
+      throw err;
     });
-
-    child.on("error", (err) => {
-      clearInterval(pollInterval);
-      clearTimeout(timeout);
-      reject(err);
-    });
-  });
 }
 
 /**

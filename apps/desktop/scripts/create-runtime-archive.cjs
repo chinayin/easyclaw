@@ -1582,7 +1582,7 @@ function generateCompileCache() {
 
 // ─── Phase 6: Create archive ───
 
-function createArchive() {
+async function createArchive() {
   log("Creating runtime archive...");
 
   // Ensure output dir exists
@@ -1605,34 +1605,31 @@ function createArchive() {
 
   // Pre-bundled extensions were already copied into staging/extensions/ before the smoke test.
 
-  // Build tar exclusion list
-  const excludes = [
-    "--exclude=.git",
-    "--exclude=.gitignore",
-    "--exclude=.gitattributes",
-    "--exclude=node_modules/.cache",
-    "--exclude=node_modules/.package-lock.json",
-    "--exclude=.turbo",
-    "--exclude=.bundled",
-    "--exclude=.bundle-keepset.json",
-  ];
-
-  // Create tar.gz archive from the staging directory.
-  // Use -C to cd into the staging parent so the archive root is "openclaw/"
-  // Use execFileSync (no shell) to avoid cmd.exe path/glob interpretation issues
-  // on Windows that can cause tar to silently archive only a subset of files.
-  const tarArgs = [
-    "czf", archivePath,
-    ...excludes,
-    "-C", path.dirname(stagingDir),
-    path.basename(stagingDir),
-  ];
+  // Create tar.gz archive using the npm `tar` package (pure JS).
+  // System tar (bsdtar) on Windows has known issues with junctions/symlinks
+  // that cause it to silently archive only a subset of files.
+  const tar = require("tar");
+  const excludeSet = new Set([".git", ".gitignore", ".gitattributes", ".turbo", ".bundled", ".bundle-keepset.json"]);
 
   const t0 = Date.now();
   try {
-    execFileSync("tar", tarArgs, { stdio: "inherit", timeout: 600_000 });
+    await tar.create(
+      {
+        gzip: true,
+        file: archivePath,
+        cwd: path.dirname(stagingDir),
+        filter: (entryPath) => {
+          const base = path.basename(entryPath);
+          if (excludeSet.has(base)) return false;
+          if (entryPath.includes("node_modules/.cache")) return false;
+          if (entryPath.includes("node_modules/.package-lock.json")) return false;
+          return true;
+        },
+      },
+      [path.basename(stagingDir)],
+    );
   } catch (err) {
-    console.error("[create-runtime-archive] tar command failed:", /** @type {Error} */ (err).message);
+    console.error("[create-runtime-archive] tar.create failed:", /** @type {Error} */ (err).message);
     process.exit(1);
   }
   const elapsed = Date.now() - t0;
@@ -1737,7 +1734,7 @@ function createArchive() {
     generateCompileCache();
 
     // Phase 6: Create the archive (from staging)
-    const manifest = createArchive();
+    const manifest = await createArchive();
 
     const totalElapsed = ((Date.now() - t0) / 1000).toFixed(1);
     log(`Done in ${totalElapsed}s. Archive: ${ARCHIVE_FILE} (${fmtSize(fs.statSync(path.join(ARCHIVE_DIR, ARCHIVE_FILE)).size)}), version ${manifest.version}`);
