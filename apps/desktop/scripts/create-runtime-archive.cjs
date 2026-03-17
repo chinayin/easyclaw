@@ -1619,18 +1619,18 @@ function createArchive() {
 
   // Create tar.gz archive from the staging directory.
   // Use -C to cd into the staging parent so the archive root is "openclaw/"
-  // On Windows, convert backslashes to forward slashes for tar compatibility.
-  const toSlash = (p) => p.replace(/\\/g, "/");
-  const tarCmd = [
-    "tar", "czf", toSlash(archivePath),
+  // Use execFileSync (no shell) to avoid cmd.exe path/glob interpretation issues
+  // on Windows that can cause tar to silently archive only a subset of files.
+  const tarArgs = [
+    "czf", archivePath,
     ...excludes,
-    "-C", toSlash(path.dirname(stagingDir)),
+    "-C", path.dirname(stagingDir),
     path.basename(stagingDir),
-  ].join(" ");
+  ];
 
   const t0 = Date.now();
   try {
-    execSync(tarCmd, { stdio: "inherit", timeout: 600_000 });
+    execFileSync("tar", tarArgs, { stdio: "inherit", timeout: 600_000 });
   } catch (err) {
     console.error("[create-runtime-archive] tar command failed:", /** @type {Error} */ (err).message);
     process.exit(1);
