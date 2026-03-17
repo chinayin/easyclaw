@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../providers/AuthProvider.js";
-import { formatError } from "@easyclaw/core";
+import { formatError } from "@rivonclaw/core";
 
 export function AuthPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { t } = useTranslation();

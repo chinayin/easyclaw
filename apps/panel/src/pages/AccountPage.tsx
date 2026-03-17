@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@apollo/client/react";
-import { GQL } from "@easyclaw/core";
+import { GQL } from "@rivonclaw/core";
 import { useAuth } from "../providers/AuthProvider.js";
 import { SUBSCRIPTION_STATUS_QUERY } from "../api/auth-queries.js";
 

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@apollo/client/react";
-import { GQL } from "@easyclaw/core";
+import { GQL } from "@rivonclaw/core";
 import { SKILLS_QUERY } from "../api/skills-queries.js";
 import {
   fetchInstalledSkills,

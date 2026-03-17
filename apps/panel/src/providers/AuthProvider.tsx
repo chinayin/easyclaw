@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import type { ReactNode } from "react";
 import { useMutation, useQuery } from "@apollo/client/react";
-import { GQL } from "@easyclaw/core";
+import { GQL } from "@rivonclaw/core";
 import { ME_QUERY, LOGIN_MUTATION, REGISTER_MUTATION } from "../api/auth-queries.js";
 import {
   setTokenGetter,
@@ -32,8 +32,8 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
-const TOKEN_KEY = "easyclaw.auth.token";
-const REFRESH_KEY = "easyclaw.auth.refreshToken";
+const TOKEN_KEY = "rivonclaw.auth.token";
+const REFRESH_KEY = "rivonclaw.auth.refreshToken";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);

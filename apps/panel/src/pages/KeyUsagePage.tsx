@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@apollo/client/react";
-import type { GQL } from "@easyclaw/core";
+import type { GQL } from "@rivonclaw/core";
 import {
   fetchKeyUsage, fetchActiveKeyUsage, fetchKeyUsageTimeseries,
   type KeyModelUsageSummary, type ActiveKeyInfo, type KeyUsageDailyBucket,

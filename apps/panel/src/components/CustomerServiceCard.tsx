@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { formatError } from "@easyclaw/core";
+import { formatError } from "@rivonclaw/core";
 import { AuthGate } from "./AuthGate.js";
 import {
   fetchCSStatus,

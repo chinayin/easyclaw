@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useAuth } from "../../providers/AuthProvider.js";
-import { formatError } from "@easyclaw/core";
+import { formatError } from "@rivonclaw/core";
 import { Modal } from "./Modal.js";
 import { useToast } from "../Toast.js";
 
