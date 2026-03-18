@@ -123,13 +123,17 @@ function fixSemanticErrors(config: Record<string, unknown>): string[] {
   return allRemoved;
 }
 
-/** Plugin IDs that have been permanently removed or renamed.
- *  These are stripped from plugins.allow and plugins.entries on every config write
- *  so stale configs from the EasyClaw → RivonClaw rebrand don't break gateway startup. */
-const REMOVED_PLUGIN_IDS = new Set([
-  "wecom", "dingtalk",
-  "easyclaw-tools", "easyclaw-policy", "easyclaw-event-bridge", "easyclaw-file-permissions",
-]);
+/** Plugin IDs that have been permanently removed from the project. */
+const REMOVED_PLUGIN_IDS = new Set(["wecom", "dingtalk"]);
+
+/** Plugin IDs renamed during the EasyClaw → RivonClaw rebrand.
+ *  Old names are replaced with new names in plugins.allow on every config write. */
+const RENAMED_PLUGIN_IDS: Record<string, string> = {
+  "easyclaw-tools": "rivonclaw-tools",
+  "easyclaw-policy": "rivonclaw-policy",
+  "easyclaw-event-bridge": "rivonclaw-event-bridge",
+  "easyclaw-file-permissions": "rivonclaw-file-permissions",
+};
 
 /**
  * Find the monorepo root by looking for pnpm-workspace.yaml
@@ -725,20 +729,33 @@ export function writeGatewayConfig(options: WriteGatewayConfigOptions): string {
           : {};
       delete existingEntries["search-browser-fallback"];
       for (const id of REMOVED_PLUGIN_IDS) delete existingEntries[id];
+      // Rename stale easyclaw-* entries to rivonclaw-*
+      for (const [oldId, newId] of Object.entries(RENAMED_PLUGIN_IDS)) {
+        if (oldId in existingEntries) {
+          existingEntries[newId] = existingEntries[oldId];
+          delete existingEntries[oldId];
+        }
+      }
       if (Object.keys(existingEntries).length > 0) {
         merged.entries = existingEntries;
       }
 
-      // Remove permanently-removed plugin IDs from the allowlist to prevent
-      // gateway startup failures (e.g. wecom was removed in v2026.3).
+      // Clean up the allowlist: remove permanently-removed IDs and
+      // replace renamed easyclaw-* IDs with their rivonclaw-* equivalents.
       if (Array.isArray(merged.allow)) {
         const before = merged.allow as string[];
-        const after = before.filter((id) => !REMOVED_PLUGIN_IDS.has(id));
+        const after = before
+          .filter((id) => !REMOVED_PLUGIN_IDS.has(id))
+          .map((id) => RENAMED_PLUGIN_IDS[id] ?? id);
         const removed = before.filter((id) => REMOVED_PLUGIN_IDS.has(id));
+        const renamed = before.filter((id) => id in RENAMED_PLUGIN_IDS);
         if (removed.length > 0) {
           log.warn(`Removed stale plugin IDs from plugins.allow: ${removed.join(", ")}`);
         }
-        merged.allow = after;
+        if (renamed.length > 0) {
+          log.info(`Renamed plugin IDs in plugins.allow: ${renamed.map((id) => `${id} → ${RENAMED_PLUGIN_IDS[id]}`).join(", ")}`);
+        }
+        merged.allow = [...new Set(after)];
       }
     }
 
