@@ -123,8 +123,13 @@ function fixSemanticErrors(config: Record<string, unknown>): string[] {
   return allRemoved;
 }
 
-/** Plugin IDs that have been permanently removed from the project. */
-const REMOVED_PLUGIN_IDS = new Set(["wecom", "dingtalk"]);
+/** Plugin IDs that have been permanently removed or renamed.
+ *  These are stripped from plugins.allow and plugins.entries on every config write
+ *  so stale configs from the EasyClaw → RivonClaw rebrand don't break gateway startup. */
+const REMOVED_PLUGIN_IDS = new Set([
+  "wecom", "dingtalk",
+  "easyclaw-tools", "easyclaw-policy", "easyclaw-event-bridge", "easyclaw-file-permissions",
+]);
 
 /**
  * Find the monorepo root by looking for pnpm-workspace.yaml

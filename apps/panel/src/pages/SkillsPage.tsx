@@ -335,9 +335,37 @@ export function SkillsPage() {
               >
                 {t("skills.prevPage")}
               </button>
-              <span className="text-muted">
-                {t("skills.pageInfo", { page, totalPages })}
-              </span>
+              {(() => {
+                // Build page number list with ellipsis gaps
+                const pages: (number | "ellipsis-left" | "ellipsis-right")[] = [];
+                if (totalPages <= 7) {
+                  for (let i = 1; i <= totalPages; i++) pages.push(i);
+                } else {
+                  // Always show first page
+                  pages.push(1);
+                  if (page > 4) pages.push("ellipsis-left");
+                  // Pages around current
+                  const start = Math.max(2, page - 1);
+                  const end = Math.min(totalPages - 1, page + 1);
+                  for (let i = start; i <= end; i++) pages.push(i);
+                  if (page < totalPages - 3) pages.push("ellipsis-right");
+                  // Always show last page
+                  pages.push(totalPages);
+                }
+                return pages.map((p) =>
+                  typeof p === "string" ? (
+                    <span key={p} className="pagination-ellipsis">...</span>
+                  ) : (
+                    <button
+                      key={p}
+                      className={`btn btn-sm pagination-page-btn${p === page ? " pagination-page-btn-active" : ""}`}
+                      onClick={() => setPage(p)}
+                    >
+                      {p}
+                    </button>
+                  ),
+                );
+              })()}
               <button
                 className="btn btn-secondary btn-sm"
                 disabled={page >= totalPages}
